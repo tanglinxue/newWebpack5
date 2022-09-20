@@ -1,8 +1,12 @@
+const os = require('os')
 const path = require("path"); // nodejs核心模块，专门用来处理路径问题
 const ESLintPlugin = require("eslint-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const CssMinimizerPlugin = require("css-minimizer-webpack-plugin");
+const TerserWebpackPlugin = require("terser-webpack-plugin");
+
+const threads = os.cpus().length;
 // 用来获取处理样式的loader
 function getStyleLoader(pre) {
   return [
@@ -37,57 +41,76 @@ module.exports = {
   },
   //加载器
   module: {
-    rules: [
-      //loader的配置
-      // 每个文件只能被其中一个loader配置处理
-      {
-        test: /\.css$/, // 只检测.css文件
-        use: getStyleLoader()
-      },
-      {
-        test: /\.less$/,
-        // loader: 'xxx', // 只能使用1个loader
-        use: getStyleLoader("less-loader"),
-      },
-      {
-        test: /\.s[ac]ss$/,
-        // loader: 'xxx', // 只能使用1个loader
-        use: getStyleLoader("sass-loader"),
-      },
-      {
-        test: /\.styl$/,
-        use: getStyleLoader("stylus-loader"),
-      },
-      {
-        test: /\.(png|jpe?g|gif|webp|svg)$/,
-        type: "asset",
-        parser: {
-          dataUrlCondition: {
-            // 小于10kb的图片转base64
-            // 优点：减少请求数量  缺点：体积会更大
-            maxSize: 10 * 1024, // 10kb
+    rules: [{
+        oneOf: [
+          //loader的配置
+          // 每个文件只能被其中一个loader配置处理
+          {
+            test: /\.css$/, // 只检测.css文件
+            use: getStyleLoader()
           },
-        },
-        generator: {
-          // 输出图片名称
-          // [hash:10] hash值取前10位
-          filename: "static/images/[hash:10][ext][query]",
-        },
-      },
-      {
-        test: /\.(ttf|woff2?|map3|map4|avi)$/,
-        type: "asset/resource",
-        generator: {
-          // 输出图片名称
-          // [hash:10] hash值取前10位
-          filename: "static/media/[hash:10][ext][query]",
-        },
-      },
-      {
-        test: /\.js$/,
-        exclude: /node_modules/, // 排除node_modules下的文件，其他文件都处理
-        loader: "babel-loader",
-      },
+          {
+            test: /\.less$/,
+            // loader: 'xxx', // 只能使用1个loader
+            use: getStyleLoader("less-loader"),
+          },
+          {
+            test: /\.s[ac]ss$/,
+            // loader: 'xxx', // 只能使用1个loader
+            use: getStyleLoader("sass-loader"),
+          },
+          {
+            test: /\.styl$/,
+            use: getStyleLoader("stylus-loader"),
+          },
+          {
+            test: /\.(png|jpe?g|gif|webp|svg)$/,
+            type: "asset",
+            parser: {
+              dataUrlCondition: {
+                // 小于10kb的图片转base64
+                // 优点：减少请求数量  缺点：体积会更大
+                maxSize: 10 * 1024, // 10kb
+              },
+            },
+            generator: {
+              // 输出图片名称
+              // [hash:10] hash值取前10位
+              filename: "static/images/[hash:10][ext][query]",
+            },
+          },
+          {
+            test: /\.(ttf|woff2?|map3|map4|avi)$/,
+            type: "asset/resource",
+            generator: {
+              // 输出图片名称
+              // [hash:10] hash值取前10位
+              filename: "static/media/[hash:10][ext][query]",
+            },
+          },
+          {
+            test: /\.js$/,
+            //exclude: /node_modules/, // 排除node_modules下的文件，其他文件都处理
+            include: path.resolve(__dirname, '../src'), //只处理src下的文件，其他文件不处理
+            use: [{
+                loader: 'thread-loader', //开启多进程
+                options: {
+                  works: threads //进程数量
+                }
+              },
+              {
+                loader: "babel-loader",
+                options: {
+                  cacheDirectory: true, //开启Babel缓存
+                  cacheCompression: false, //关闭缓存文件压缩
+                  plugins: ["@babel/plugin-transform-runtime"], // 减少代码体积
+                }
+              }
+            ]
+          },
+        ]
+      }
+
     ]
   },
   //插件
@@ -96,6 +119,10 @@ module.exports = {
     new ESLintPlugin({
       // 检测哪些文件
       context: path.resolve(__dirname, '../src'),
+      exclude: 'node_modules',
+      cache: true, //开启缓存
+      cacheLocation: path.resolve(__dirname, '../node_modules/.cache/eslintcache'),
+      threads
     }),
     new HtmlWebpackPlugin({
       // 模板：以public/index.html文件创建新的html文件
@@ -104,9 +131,19 @@ module.exports = {
     }),
     new MiniCssExtractPlugin({
       filename: 'static/css/main.css'
-    }),
-    new CssMinimizerPlugin(),
+    })
+
   ],
+  optimization: {
+    minimizer: [
+      // 压缩css
+      new CssMinimizerPlugin(),
+      // 压缩js
+      new TerserWebpackPlugin({
+        parallel: threads  //开启多进程和设置进程数量
+      })
+    ]
+  },
   //模式
   mode: 'production',
   devtool: "source-map",
